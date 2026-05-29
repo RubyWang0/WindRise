@@ -1,0 +1,10 @@
+{
+  "name": "windrise-agent-backend-skills",
+  "version": "1.0.0",
+  "description": "Node.js dependencies for Agent Backend Skills and Workflows",
+  "dependencies": {
+    "adm-zip": "^0.5.17",
+    "marked": "^12.0.2"
+  },
+  "type": "module"
+}
