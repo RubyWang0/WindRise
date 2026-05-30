@@ -34,7 +34,6 @@ class WorkflowAgent(BaseAgent):
         """在独立的后台线程中执行阻塞式工作流，避免阻塞 FastAPI 异步事件循环"""
         import queue
         import asyncio
-        from concurrent.futures import ThreadPoolExecutor
 
         q = queue.Queue()
 
@@ -46,10 +45,9 @@ class WorkflowAgent(BaseAgent):
             except Exception as e:
                 q.put(("error", e))
 
-        # 在线程库中以多线程并发执行阻塞性同步工作流
+        # 在后台线程中以多线程并发执行同步工作流，使用 loop 的默认线程池避免线程与内存泄漏
         loop = asyncio.get_running_loop()
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = loop.run_in_executor(executor, producer)
+        future = loop.run_in_executor(None, producer)
 
         try:
             while True:
