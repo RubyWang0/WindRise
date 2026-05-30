@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from agent_backend.agent.registry import agent_registry
 from agent_backend.core.settings import settings
-from agent_backend.core.workflow_state import request_stop
+from agent_backend.core.workflow_state import request_stop, kill_active_subprocess
 
 router = APIRouter()
 
@@ -20,9 +20,10 @@ async def agent_stop(
     """
     Request a graceful stop of the currently running workflow for the given session.
     The workflow state is preserved (status=paused) so the user can resume later.
+    It recursively kills all active child/grandchild processes.
     """
-    request_stop(session_id)
-    return {"success": True, "message": f"Stop requested for session {session_id}"}
+    killed = kill_active_subprocess(session_id)
+    return {"success": True, "message": f"Stop requested. Processes killed: {killed}"}
 
 
 @router.get("/stream")

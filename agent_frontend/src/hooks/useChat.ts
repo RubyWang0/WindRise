@@ -150,9 +150,11 @@ export function useChat(serviceId: string, initialSessionId?: string) {
       },
       // workflow 暂停：标记消息为暂停状态
       onWorkflowPaused: (data?: any) => {
+        const isStopped = !!data?.stopped;
         updateLastMessage(sessionId, (msg) => ({
           ...msg,
-          workflowPaused: true,
+          content: isStopped ? '已暂停' : msg.content,
+          workflowPaused: !isStopped,
           templateImageCount: data?.template_image_count
         }));
         useAppStore.getState().setWorkflowRunning(sessionId, false);
@@ -192,14 +194,27 @@ export function useChat(serviceId: string, initialSessionId?: string) {
   const stopWorkflow = useCallback(async (customSessionId?: string) => {
     const sessionId = customSessionId || initialSessionId || useAppStore.getState().activeSessionId[serviceId];
     if (!sessionId) return;
+
+    // 1. 立即断开 SSE 连接，防止后端后续流式内容及思考过程继续渲染至前端
+    disconnect();
+
+    // 2. 立即将最近的一条回复内容重置为“已暂停”以消除加载动画，并关闭工作流暂停按钮面板
+    updateLastMessage(sessionId, (msg) => ({
+      ...msg,
+      content: '已暂停',
+      workflowPaused: false
+    }));
+
+    // 3. 异步向后端发送停止请求以销毁其底层的子进程并更新后端状态
     try {
       await fetch(`${API_BASE}/api/v1/agent/stop?session_id=${sessionId}`, { method: 'POST' });
     } catch (e) {
       console.error('Failed to stop workflow:', e);
     }
-    // 即刻解除 running 状态，让按钮可用
+
+    // 4. 即刻解除全局 running 状态，重新激活聊天框输入与发送按钮
     useAppStore.getState().setWorkflowRunning(sessionId, false);
-  }, [serviceId, initialSessionId]);
+  }, [serviceId, initialSessionId, disconnect, updateLastMessage]);
 
   return { sendMessage, disconnect, stopWorkflow };
 }

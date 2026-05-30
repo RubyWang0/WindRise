@@ -26,22 +26,55 @@ class LocalCodeExecutor(BaseCodeExecutor):
             tmp_path = tmp_file.name
             
         try:
-            # Execute in the session's workspace directory
-            result = subprocess.run(
-                ['python', tmp_path],
+            # Execute in the session's workspace directory using subprocess.Popen to allow registration and cancellation
+            from agent_backend.core.workflow_state import register_active_subprocess, unregister_active_subprocess, is_stop_requested
+            
+            proc = subprocess.Popen(
+                ['python', '-u', tmp_path],
                 cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=10 # 10 seconds timeout
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
-            status = "success" if result.returncode == 0 else "failed"
-            return {
-                "status": status,
-                "output": result.stdout,
-                "error": result.stderr
-            }
-        except subprocess.TimeoutExpired:
-            return {"status": "failed", "output": "", "error": "Execution timed out (10s limit)"}
+            
+            if session_id:
+                register_active_subprocess(session_id, proc)
+                
+            try:
+                # Poll process status and user stop flags in a sleep loop
+                stdout, stderr = "", ""
+                import time
+                start_time = time.time()
+                timeout = 10.0
+                
+                while proc.poll() is None:
+                    if session_id and is_stop_requested(session_id):
+                        proc.terminate()
+                        proc.wait()
+                        return {"status": "failed", "output": stdout, "error": "Execution stopped by user."}
+                    
+                    if time.time() - start_time > timeout:
+                        proc.terminate()
+                        proc.wait()
+                        return {"status": "failed", "output": stdout, "error": "Execution timed out (10s limit)"}
+                    
+                    time.sleep(0.1)
+                
+                # Retrieve remaining output
+                out, err = proc.communicate()
+                stdout += out
+                stderr += err
+                
+                status = "success" if proc.returncode == 0 else "failed"
+                return {
+                    "status": status,
+                    "output": stdout,
+                    "error": stderr
+                }
+            finally:
+                if session_id:
+                    unregister_active_subprocess(session_id, proc)
+                    
         except Exception as e:
             return {"status": "failed", "output": "", "error": str(e)}
         finally:

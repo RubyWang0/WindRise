@@ -28,6 +28,49 @@ class WorkflowAgent(BaseAgent):
         self.biz_code = biz_code
         self.name = workflow_id
     
+    async def _run_workflow_threaded(
+        self, session_id: str, context: Dict[str, Any], user_input: str
+    ) -> AsyncGenerator[str, None]:
+        """在独立的后台线程中执行阻塞式工作流，避免阻塞 FastAPI 异步事件循环"""
+        import queue
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        q = queue.Queue()
+
+        def producer():
+            try:
+                for event in execute_workflow_with_stream(self.biz_code, user_input, session_id, context):
+                    q.put(("event", event))
+                q.put(("done", None))
+            except Exception as e:
+                q.put(("error", e))
+
+        # 在线程库中以多线程并发执行阻塞性同步工作流
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = loop.run_in_executor(executor, producer)
+
+        try:
+            while True:
+                try:
+                    # 使用 asyncio.to_thread 避免在读取队列时阻塞异步事件循环
+                    item_type, val = await asyncio.to_thread(q.get, timeout=0.1)
+                    if item_type == "done":
+                        break
+                    elif item_type == "error":
+                        raise val
+                    elif item_type == "event":
+                        yield self._format_event(val, session_id)
+                except queue.Empty:
+                    # 队列为空时释放 CPU 给 asyncio 事件循环以处理其他请求（如停止 API）
+                    await asyncio.sleep(0.05)
+        except Exception as e:
+            print(f"[workflow_agent] Session={session_id} | ERROR inside threaded runner: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            yield f"event: error\ndata: {json.dumps({'error': f'Workflow execution failed: {str(e)}'})}\n\n"
+
     @with_memory
     async def stream_run(
         self, 
@@ -101,12 +144,9 @@ class WorkflowAgent(BaseAgent):
                 update_workflow_state(session_id, {"user_command": "continue"})
                 
                 yield f"event: thought\ndata: {json.dumps({'step': 0, 'content': f'继续执行业务流程：{self.biz_code}', 'status': 'done'})}\n\n"
-                try:
-                    for event in execute_workflow_with_stream(self.biz_code, user_input, session_id, context):
-                        yield self._format_event(event, session_id)
-                except Exception as e:
-                    print(f"[workflow_agent] Session={session_id} | ERROR: {str(e)}")
-                    yield f"event: error\ndata: {json.dumps({'error': f'Workflow execution failed: {str(e)}'})}\n\n"
+                
+                async for chunk in self._run_workflow_threaded(session_id, context, user_input):
+                    yield chunk
                 
                 trace("workflow_end", session_id, {"status": "completed"})
                 return
@@ -129,13 +169,8 @@ class WorkflowAgent(BaseAgent):
             yield f"event: temperature_reset\ndata: {json.dumps({'temperature': final_temperature})}\n\n"
         
         # 执行工作流
-        try:
-            for event in execute_workflow_with_stream(self.biz_code, user_input, session_id, context):
-                yield self._format_event(event, session_id)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            yield f"event: error\ndata: {json.dumps({'error': f'Workflow execution failed: {str(e)}'})}\n\n"
+        async for chunk in self._run_workflow_threaded(session_id, context, user_input):
+            yield chunk
         
         trace("workflow_end", session_id, {"status": "completed"})
     
@@ -174,11 +209,9 @@ class WorkflowAgent(BaseAgent):
             return f"event: workflow_paused\ndata: {json.dumps(event)}\n\n"
         
         elif event_type == "workflow_stopped":
-            # 工作流被停止：保存了当前节点状态，可继续
-            stop_data = {'biz_code': self.biz_code, 'session_id': session_id}
-            stop_event = f"event: result\ndata: {json.dumps({'content': '\u2016 已暂停当前工作流，状态已保存。\n\n您可以补充信息后选择**继续**恢复工作流。'})}\n\n"
-            stop_event += f"event: workflow_paused\ndata: {json.dumps(stop_data)}\n\n"
-            return stop_event
+            # 工作流被停止：保存了当前节点状态，向前端发送带有 stopped: True 标记的暂停信号以清除气泡状态并修改为“已暂停”
+            stop_data = {'biz_code': self.biz_code, 'session_id': session_id, 'stopped': True}
+            return f"event: workflow_paused\ndata: {json.dumps(stop_data)}\n\n"
         
         elif event_type == "error":
             error_msg = event.get("error", "Unknown error")

@@ -46,8 +46,54 @@ class MainAgent(BaseAgent):
         
         return ""
 
+    async def _run_workflow_threaded(
+        self, biz_code: str, session_id: str, context: Dict[str, Any], user_input: str
+    ) -> AsyncGenerator[str, None]:
+        """在独立的后台线程中执行阻塞式工作流，避免阻塞 FastAPI 异步事件循环"""
+        import queue
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        q = queue.Queue()
+
+        def producer():
+            try:
+                for event in execute_workflow_with_stream(biz_code, user_input, session_id, context):
+                    q.put(("event", event))
+                q.put(("done", None))
+            except Exception as e:
+                q.put(("error", e))
+
+        # 在后台线程中执行阻塞式的同步工作流
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = loop.run_in_executor(executor, producer)
+
+        try:
+            while True:
+                try:
+                    # 使用 asyncio.to_thread 避免在读取队列时阻塞异步事件循环
+                    item_type, val = await asyncio.to_thread(q.get, timeout=0.1)
+                    if item_type == "done":
+                        break
+                    elif item_type == "error":
+                        raise val
+                    elif item_type == "event":
+                        yield self._format_workflow_event(val, session_id)
+                except queue.Empty:
+                    # 队列为空时释放 CPU 给 asyncio 事件循环以处理其他请求（如停止 API）
+                    await asyncio.sleep(0.05)
+        except Exception as e:
+            print(f"[main_agent] Session={session_id} | ERROR inside threaded runner: {str(e)}")
+            yield f"event: error\ndata: {json.dumps({'error': f'Workflow execution failed: {str(e)}'})}\n\n"
+
     @with_memory
     async def stream_run(self, session_id: str, user_input: str, model_name: str = "gpt-4-turbo", api_key: str = None, api_base: str = None, temperature: float = None, video_configs: str = None, book_configs: str = None) -> AsyncGenerator[str, None]:
+        # 清除可能残留的停止信号
+        from agent_backend.core.workflow_state import clear_stop_signal
+        if session_id:
+            clear_stop_signal(session_id)
+
         trace("agent_start", session_id, {"input": user_input, "model": model_name})
 
         # 1. Setup LLM via create_llm (supports temperature_adjusted)
@@ -96,6 +142,8 @@ class MainAgent(BaseAgent):
             clear_workflow_state,
             should_continue_workflow,
             should_stop_workflow,
+            is_stop_requested,
+            clear_stop_signal,
         )
         
         # 检查是否有暂停的 workflow 等待继续
@@ -115,11 +163,8 @@ class MainAgent(BaseAgent):
                 yield f"event: thought\ndata: {json.dumps({'step': 0, 'content': f'继续执行业务流程：{biz_code}', 'status': 'done'})}\n\n"
 
                 # 执行 workflow 下一节点
-                try:
-                    for event in execute_workflow_with_stream(biz_code, "", session_id, context):
-                        yield self._format_workflow_event(event, session_id)
-                except Exception as e:
-                    yield f"event: error\ndata: {json.dumps({'error': f'Workflow execution failed: {str(e)}'})}\n\n"
+                async for chunk in self._run_workflow_threaded(biz_code, session_id, context, ""):
+                    yield chunk
 
                 trace("agent_end", session_id, {"status": "completed"})
                 return
@@ -188,6 +233,14 @@ class MainAgent(BaseAgent):
         iteration = 0
 
         while iteration < max_iterations:
+            # 检查是否请求了停止
+            if session_id and is_stop_requested(session_id):
+                print(f"[main_agent] Detect stop requested for session {session_id}")
+                stop_data = {'biz_code': self.name, 'session_id': session_id, 'stopped': True}
+                yield f"event: workflow_paused\ndata: {json.dumps(stop_data)}\n\n"
+                trace("agent_end", session_id, {"status": "stopped_by_user"})
+                return
+
             iteration += 1
             yield f"event: thought\ndata: {json.dumps({'step': iteration, 'content': 'Analyzing next steps...', 'status': 'thinking'})}\n\n"
 
@@ -202,6 +255,14 @@ class MainAgent(BaseAgent):
 
                 # Handle Tool Calls
                 for tool_call in response.tool_calls:
+                    # 检查是否请求了停止
+                    if session_id and is_stop_requested(session_id):
+                        print(f"[main_agent] Detect stop requested for session {session_id} before tool {tool_call['name']}")
+                        stop_data = {'biz_code': self.name, 'session_id': session_id, 'stopped': True}
+                        yield f"event: workflow_paused\ndata: {json.dumps(stop_data)}\n\n"
+                        trace("agent_end", session_id, {"status": "stopped_by_user"})
+                        return
+
                     t_name = tool_call['name']
                     t_args = tool_call['args']
                     t_id = tool_call['id']
@@ -211,8 +272,8 @@ class MainAgent(BaseAgent):
                     action_data = {"toolName": t_name, "params": t_args, "status": "running"}
                     yield f"event: action\ndata: {json.dumps(action_data)}\n\n"
 
-                    # Execute Skill or Tool using unified executor
-                    result = execute_tool(t_name, t_args, session_id)
+                    # Execute Skill or Tool using unified executor in thread pool to avoid blocking the event loop
+                    result = await asyncio.to_thread(execute_tool, t_name, t_args, session_id)
 
                     action_data["status"] = "success"
                     action_data["result"] = result

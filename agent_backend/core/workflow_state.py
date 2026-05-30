@@ -18,6 +18,95 @@ DEFAULT_STOP_KEYWORDS = ["停止", "取消", "结束", "退出", "中断", "stop
 # 键: session_id  值: True 表示用户已请求停止当前工作流
 _stop_signals: dict[str, bool] = {}
 
+# ── 子进程注册表 ───────────────────────────────────────────────────
+import subprocess
+import psutil
+
+# 键: session_id  值: list[subprocess.Popen]
+_active_subprocesses: dict[str, list[subprocess.Popen]] = {}
+
+
+def register_active_subprocess(session_id: str, proc: subprocess.Popen):
+    """注册一个正在运行的子进程，用于后续可以通过信号或API提前终止。"""
+    if not session_id:
+        return
+    if session_id not in _active_subprocesses:
+        _active_subprocesses[session_id] = []
+    _active_subprocesses[session_id].append(proc)
+    print(f"[workflow_state] Registered subprocess PID {proc.pid} for session {session_id}")
+
+
+def unregister_active_subprocess(session_id: str, proc: subprocess.Popen):
+    """注销一个已完成或已终止的子进程。"""
+    if not session_id or session_id not in _active_subprocesses:
+        return
+    if proc in _active_subprocesses[session_id]:
+        _active_subprocesses[session_id].remove(proc)
+    if not _active_subprocesses[session_id]:
+        _active_subprocesses.pop(session_id, None)
+    print(f"[workflow_state] Unregistered subprocess PID {proc.pid} for session {session_id}")
+
+
+def kill_active_subprocess(session_id: str) -> bool:
+    """
+    通过 PID 及其子/孙进程树递归强制终止属于该会话的所有运行中进程。
+    同时设置内存级停止信号。
+    """
+    request_stop(session_id)
+    procs = _active_subprocesses.get(session_id, [])
+    if not procs:
+        print(f"[workflow_state] No active subprocesses to terminate for session {session_id}")
+        return False
+
+    killed_any = False
+    # 复制一份列表以避免在迭代中修改
+    for proc in list(procs):
+        if proc.poll() is None:  # 说明进程还在运行
+            print(f"[workflow_state] Terminating process tree for PID {proc.pid} (session: {session_id})...")
+            try:
+                parent = psutil.Process(proc.pid)
+                children = parent.children(recursive=True)
+                
+                # 递归终止所有子进程
+                for child in children:
+                    try:
+                        print(f"[workflow_state] Terminating child process PID {child.pid}")
+                        child.terminate()
+                    except Exception as e:
+                        print(f"[workflow_state] Error terminating child process {child.pid}: {e}")
+                
+                # 终止父进程
+                parent.terminate()
+                
+                # 等待一会儿检查是否真正退出，若没有则强制 kill
+                gone, alive = psutil.wait_procs(children + [parent], timeout=2)
+                for p in alive:
+                    try:
+                        print(f"[workflow_state] Force killing process PID {p.pid}")
+                        p.kill()
+                    except Exception as e:
+                        print(f"[workflow_state] Error force killing process {p.pid}: {e}")
+                killed_any = True
+            except psutil.NoSuchProcess:
+                print(f"[workflow_state] Process {proc.pid} already gone.")
+            except Exception as e:
+                print(f"[workflow_state] General exception during process tree termination for {proc.pid}: {e}")
+                # 兜底直接 terminate
+                try:
+                    proc.terminate()
+                    killed_any = True
+                except Exception:
+                    pass
+        
+        # 移除
+        if proc in procs:
+            procs.remove(proc)
+
+    if session_id in _active_subprocesses:
+        _active_subprocesses.pop(session_id, None)
+
+    return killed_any
+
 
 def request_stop(session_id: str):
     """由 API 端点调用，通知工作流执行循环尽快停止。"""
