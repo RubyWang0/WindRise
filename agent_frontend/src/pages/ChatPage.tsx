@@ -186,67 +186,73 @@ export const ChatPage: React.FC = () => {
                           <Sparkles size={18} className="animate-pulse" />
                         </div>
                         <div>
-                          <h2 className="text-sm font-bold text-zinc-900 dark:text-white tracking-tight">书籍创作一键直出工作流</h2>
+                          <h2 className="text-sm font-bold text-zinc-900 dark:text-white tracking-tight">书籍创作一键直出</h2>
                         </div>
                       </div>
 
-                      {/* Route Selection */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">
-                          是否配图 <span className="text-red-500 text-xs font-bold ml-0.5">*</span>
-                        </label>
-                        <select
-                          value={routeType}
-                          disabled={isWorkflowRunning}
-                          onChange={(e) => {
-                            const val = e.target.value as any;
-                            setRouteType(val);
-                            setRefMode(''); // reset reference mode when route type changes
-                          }}
-                          className={cn(
-                            "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all cursor-pointer",
-                            isWorkflowRunning
-                              ? "bg-zinc-50 dark:bg-zinc-955 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                              : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
-                          )}
-                        >
-                          <option value=""></option>
-                          <option value="with_image">配图</option>
-                          <option value="no_image">不配图</option>
-                        </select>
-                      </div>
-
-                      {/* Conditional Illustrated Reference Mode Dropdown */}
-                      {routeType === 'with_image' && (
+                      {/* Dropdowns Row */}
+                      <div className={cn(
+                        "grid gap-4",
+                        routeType === 'with_image' ? "grid-cols-2" : "grid-cols-1"
+                      )}>
+                        {/* Route Selection */}
                         <div className="space-y-1.5">
                           <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">
-                            配图参考方式 <span className="text-red-500 text-xs font-bold ml-0.5">*</span>
+                            是否配图 <span className="text-red-500 text-xs font-bold ml-0.5">*</span>
                           </label>
                           <select
-                            value={refMode}
+                            value={routeType}
                             disabled={isWorkflowRunning}
                             onChange={(e) => {
                               const val = e.target.value as any;
-                              setRefMode(val);
-                              if (val === 'template') {
-                                setUseTemplate(true);
-                              } else if (val === 'custom') {
-                                setUseTemplate(false);
-                              }
+                              setRouteType(val);
+                              setRefMode(''); // reset reference mode when route type changes
                             }}
                             className={cn(
                               "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all cursor-pointer",
                               isWorkflowRunning
-                                ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                ? "bg-zinc-50 dark:bg-zinc-955 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
                                 : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
                             )}
                           >
                             <option value=""></option>
-                            <option value="template">参考模板配图</option>
-                            <option value="custom">自定义图片数</option>
+                            <option value="with_image">配图</option>
+                            <option value="no_image">不配图</option>
                           </select>
                         </div>
-                      )}
+
+                        {/* Conditional Illustrated Reference Mode Dropdown */}
+                        {routeType === 'with_image' && (
+                          <div className="space-y-1.5 animate-fadeIn">
+                            <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">
+                              配图参考方式 <span className="text-red-500 text-xs font-bold ml-0.5">*</span>
+                            </label>
+                            <select
+                              value={refMode}
+                              disabled={isWorkflowRunning}
+                              onChange={(e) => {
+                                const val = e.target.value as any;
+                                setRefMode(val);
+                                if (val === 'template') {
+                                  setUseTemplate(true);
+                                } else if (val === 'custom') {
+                                  setUseTemplate(false);
+                                }
+                              }}
+                              className={cn(
+                                "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all cursor-pointer",
+                                isWorkflowRunning
+                                  ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                  : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                              )}
+                            >
+                              <option value=""></option>
+                              <option value="template">参考模板配图</option>
+                              <option value="custom">自定义图片数</option>
+                            </select>
+                          </div>
+                        )}
+                      </div>
 
                       {/* Form Container */}
                       <div className="space-y-4">
@@ -408,7 +414,7 @@ export const ChatPage: React.FC = () => {
                           {/* Reminder Badge */}
                           <div className="flex items-center space-x-2 p-3 bg-[#F8F9FA]/80 border border-zinc-300 text-zinc-755 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-300 text-xs rounded-2xl transition-colors">
                             <AlertCircle size={14} className="flex-shrink-0 text-zinc-550 dark:text-zinc-455" />
-                            <span>💡 提示：确认参数无误后，请确认已通过输入框左下角的 加号图标 上传了 书籍目录 和 Word 样式模板。</span>
+                            <span>💡 开始前请确认已上传了 目录 和 模板。</span>
                           </div>
                         </div>
                       )}
