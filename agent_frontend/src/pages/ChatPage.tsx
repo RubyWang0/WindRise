@@ -4,7 +4,7 @@ import { useChat } from '../hooks/useChat';
 import { ChatMessage } from '../components/ChatMessage';
 import { cn } from '../utils';
 import AgentIcon from '../assets/icon.png';
-import { Send, FileUp, FolderPlus, Sparkles, Settings, BookOpen, Image, ImageOff, AlertCircle, Play, Plus, X, FileText, FileSpreadsheet, File, Download, ChevronRight, Loader2, Square, Lock } from 'lucide-react';
+import { Send, FileUp, FolderPlus, Sparkles, AlertCircle, Plus, X, FileText, FileSpreadsheet, File, Square } from 'lucide-react';
 import { FileItem } from '../types';
 
 const formatFileSize = (bytes: number): string => {
@@ -25,11 +25,10 @@ export const ChatPage: React.FC = () => {
   // Draft file upload states
   const [pendingFiles, setPendingFiles] = useState<FileItem[]>([]);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
-  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
-  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
 
   // Configurator states for book_writing_workflow
-  const [routeType, setRouteType] = useState<'with_image' | 'no_image'>('with_image');
+  const [routeType, setRouteType] = useState<'with_image' | 'no_image' | ''>('');
+  const [refMode, setRefMode] = useState<'template' | 'custom' | ''>('');
   const [useTemplate, setUseTemplate] = useState(true);
   const [imageNum, setImageNum] = useState<number>(3);
   const [num, setNum] = useState<number>(1500);
@@ -74,7 +73,10 @@ export const ChatPage: React.FC = () => {
   }, [currentMessages]);
 
   const handleSend = async () => {
-    if (input.trim() || pendingFiles.length > 0) {
+    const isConfigured = routeType === 'no_image' || (routeType === 'with_image' && refMode !== '');
+    const isWritingWorkflow = activeServiceId === 'book_writing_workflow';
+
+    if (input.trim() || pendingFiles.length > 0 || (isWritingWorkflow && isConfigured && !isWorkflowRunning)) {
       let targetSessionId = currentSessionId;
       if (!targetSessionId) {
         try {
@@ -86,7 +88,18 @@ export const ChatPage: React.FC = () => {
         }
       }
 
-      const messageText = input.trim() || `📁 上传了 ${pendingFiles.length} 个文件`;
+      let messageText = input.trim();
+      
+      if (isWritingWorkflow && isConfigured && !isWorkflowRunning) {
+        if (routeType === 'no_image') {
+          messageText = `开始工作流：--book-style "${bookStyle}" --num ${num} --image-num 0 --direct-run`;
+        } else {
+          messageText = `开始工作流：--book-style "${bookStyle}" --num ${num} --target "${target}" --markers "${markers}" --img-style "${imgStyle}" --image-num ${imageNum} ${useTemplate ? '参考模板' : '不参考'} --direct-run`;
+        }
+      } else if (!messageText) {
+        messageText = `📁 上传了 ${pendingFiles.length} 个文件`;
+      }
+
       sendMessage(messageText, targetSessionId, pendingFiles);
       setInput('');
       setPendingFiles([]);
@@ -153,18 +166,7 @@ export const ChatPage: React.FC = () => {
 
   };
 
-  const fetchWorkspaceFiles = async () => {
-    if (!currentSessionId) return;
-    try {
-      const response = await fetch(`http://localhost:8000/api/v1/file/list?session_id=${currentSessionId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setWorkspaceFiles(data.data || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch workspace files:', err);
-    }
-  };
+
 
   return (
     <div className="flex flex-1 overflow-hidden bg-[#EDF0F2] dark:bg-black text-zinc-800 dark:text-zinc-100 transition-colors duration-200">
@@ -173,305 +175,244 @@ export const ChatPage: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-4 bg-[#EDF0F2] dark:bg-black transition-colors duration-200">
           <div className={`mx-auto px-4 transition-all duration-300 ${activeServiceId === 'video_workflow' ? "max-w-6xl" : "max-w-4xl"}`}>
             {activeServiceId === 'book_writing_workflow' ? (
-              <div className="flex flex-col space-y-6">
+              <div className="flex flex-col space-y-4">
                 {/* Configuration Panel */}
-                <div className="flex flex-col max-w-2xl mx-auto mt-6 p-6 rounded-3xl border border-zinc-300 dark:border-zinc-800 bg-white/60 dark:bg-[#030303] shadow-md dark:shadow-2xl space-y-6 animate-fadeIn transition-colors duration-200">
-                  {/* Header */}
-                  <div className="flex items-center space-x-3 pb-4 border-b border-zinc-200 dark:border-zinc-850">
-                    <div className="p-3 bg-white/80 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-300 rounded-2xl border border-zinc-300 dark:border-zinc-800">
-                      <Sparkles size={24} className="animate-pulse" />
-                    </div>
-                    <div>
-                      <h2 className="text-lg font-bold text-zinc-900 dark:text-white tracking-tight">书籍创作一键直出排版工作流</h2>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">配置参数后一键运行到最终高保真 Word 书籍排版结果</p>
-                    </div>
-                  </div>
-
-                  {/* Route Selection */}
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block">选择书籍排版路线</label>
-                    <div className="grid grid-cols-2 gap-4">
-                      <button
-                        type="button"
-                        disabled={isWorkflowRunning}
-                        onClick={() => setRouteType('with_image')}
-                        className={cn(
-                          "flex flex-col items-center justify-center p-4 rounded-2xl border text-center transition-all",
-                          isWorkflowRunning ? "cursor-not-allowed opacity-65" : "cursor-pointer",
-                          routeType === 'with_image'
-                            ? "border-zinc-700 bg-white text-zinc-900 dark:border-zinc-500 dark:bg-zinc-900 dark:text-white shadow-sm"
-                            : isWorkflowRunning
-                              ? "border-zinc-200 bg-zinc-50 text-zinc-450 dark:border-zinc-950 dark:text-zinc-600 bg-[#010101]/25"
-                              : "border-zinc-300 hover:bg-white/40 text-zinc-650 hover:text-zinc-900 dark:border-zinc-850 dark:hover:bg-zinc-900/60 dark:text-zinc-450 dark:hover:text-zinc-200 bg-white/30 dark:bg-zinc-950/40"
-                        )}
-                      >
-                        <Image size={24} className={cn("mb-2", routeType === 'with_image' ? "text-zinc-900 dark:text-white" : "text-zinc-400 dark:text-zinc-500")} />
-                        <span className="text-sm font-semibold">配图排版路线</span>
-                        <span className="text-[10px] text-zinc-550 dark:text-zinc-500 mt-1">自动段落内容截取、规划绘图、高清插图生成与回填</span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isWorkflowRunning}
-                        onClick={() => setRouteType('no_image')}
-                        className={cn(
-                          "flex flex-col items-center justify-center p-4 rounded-2xl border text-center transition-all",
-                          isWorkflowRunning ? "cursor-not-allowed opacity-65" : "cursor-pointer",
-                          routeType === 'no_image'
-                            ? "border-zinc-700 bg-white text-zinc-900 dark:border-zinc-500 dark:bg-zinc-900 dark:text-white shadow-sm"
-                            : isWorkflowRunning
-                              ? "border-zinc-200 bg-zinc-50 text-zinc-450 dark:border-zinc-950 dark:text-zinc-600 bg-[#010101]/25"
-                              : "border-zinc-300 hover:bg-white/40 text-zinc-655 hover:text-zinc-900 dark:border-zinc-850 dark:hover:bg-zinc-900/60 dark:text-zinc-450 dark:hover:text-zinc-200 bg-white/30 dark:bg-zinc-950/40"
-                        )}
-                      >
-                        <ImageOff size={24} className={cn("mb-2", routeType === 'no_image' ? "text-zinc-900 dark:text-white" : "text-zinc-400 dark:text-zinc-500")} />
-                        <span className="text-sm font-semibold">不配图极速路线</span>
-                        <span className="text-[10px] text-zinc-550 dark:text-zinc-500 mt-1">仅写稿、自然合并与 Word 套模排版</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Form Container */}
-                  <div className="space-y-4">
-                    {routeType === 'no_image' ? (
-                      /* Text-Only Route Parameters */
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5 col-span-1">
-                          <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">书籍写作风格 (--book-style)</label>
-                          <input
-                            type="text"
-                            value={bookStyle}
-                            disabled={isWorkflowRunning}
-                            onChange={(e) => setBookStyle(e.target.value)}
-                            placeholder="专业教学风"
-                            className={cn(
-                              "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 transition-all",
-                              isWorkflowRunning
-                                ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                                : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
-                            )}
-                          />
+                <div className="flex w-full my-4 px-4 justify-start">
+                  <div className="w-full max-w-[85%] flex flex-col min-w-0 items-start">
+                    <div className="w-full p-4 rounded-2xl border border-zinc-300 dark:border-zinc-800 bg-white/60 dark:bg-[#030303] shadow-md space-y-4 animate-fadeIn transition-colors duration-200">
+                      {/* Header */}
+                      <div className="flex items-center space-x-2.5 pb-2.5 border-b border-zinc-200 dark:border-zinc-855">
+                        <div className="p-2 bg-white/80 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-300 rounded-xl border border-zinc-300 dark:border-zinc-800">
+                          <Sparkles size={18} className="animate-pulse" />
                         </div>
-                        <div className="space-y-1.5 col-span-1">
-                          <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">每小节目标字数 (--num)</label>
-                          <input
-                            type="number"
-                            min={100}
-                            max={10000}
-                            value={num}
-                            disabled={isWorkflowRunning}
-                            onChange={(e) => setNum(parseInt(e.target.value) || 1500)}
-                            className={cn(
-                              "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-650 transition-all",
-                              isWorkflowRunning
-                                ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                                : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
-                            )}
-                          />
+                        <div>
+                          <h2 className="text-sm font-bold text-zinc-900 dark:text-white tracking-tight">书籍创作一键直出工作流</h2>
                         </div>
                       </div>
-                    ) : (
-                      /* Illustrated Route Parameters */
-                      <div className="space-y-4">
-                        {/* Reference Mode */}
-                        <div className="space-y-2">
-                          <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">配图参考方式</label>
-                          <div className="grid grid-cols-2 gap-3">
-                            <button
-                              type="button"
-                              disabled={isWorkflowRunning}
-                              onClick={() => {
+
+                      {/* Route Selection */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">
+                          是否配图 <span className="text-red-500 text-xs font-bold ml-0.5">*</span>
+                        </label>
+                        <select
+                          value={routeType}
+                          disabled={isWorkflowRunning}
+                          onChange={(e) => {
+                            const val = e.target.value as any;
+                            setRouteType(val);
+                            setRefMode(''); // reset reference mode when route type changes
+                          }}
+                          className={cn(
+                            "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all cursor-pointer",
+                            isWorkflowRunning
+                              ? "bg-zinc-50 dark:bg-zinc-955 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                              : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                          )}
+                        >
+                          <option value=""></option>
+                          <option value="with_image">配图</option>
+                          <option value="no_image">不配图</option>
+                        </select>
+                      </div>
+
+                      {/* Conditional Illustrated Reference Mode Dropdown */}
+                      {routeType === 'with_image' && (
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">
+                            配图参考方式 <span className="text-red-500 text-xs font-bold ml-0.5">*</span>
+                          </label>
+                          <select
+                            value={refMode}
+                            disabled={isWorkflowRunning}
+                            onChange={(e) => {
+                              const val = e.target.value as any;
+                              setRefMode(val);
+                              if (val === 'template') {
                                 setUseTemplate(true);
-                              }}
-                              className={cn(
-                                "flex items-center justify-center space-x-2 px-3 py-2 text-xs font-medium rounded-xl border transition-all",
-                                isWorkflowRunning ? "cursor-not-allowed opacity-65" : "cursor-pointer",
-                                useTemplate
-                                  ? "border-zinc-700 bg-white text-zinc-900 dark:border-zinc-500 dark:bg-zinc-900 dark:text-white shadow-sm"
-                                  : isWorkflowRunning
-                                    ? "border-zinc-200 bg-zinc-50 text-zinc-400 dark:border-zinc-950 dark:text-zinc-600 bg-[#010101]/25"
-                                    : "border-zinc-300 hover:bg-[#F8F9FA] text-zinc-600 hover:text-zinc-800 dark:border-zinc-850 dark:hover:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200 bg-white/30 dark:bg-zinc-950/40"
-                              )}
-                            >
-                              <BookOpen size={13} />
-                              <span>参考模板配图</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isWorkflowRunning}
-                              onClick={() => setUseTemplate(false)}
-                              className={cn(
-                                "flex items-center justify-center space-x-2 px-3 py-2 text-xs font-medium rounded-xl border transition-all",
-                                isWorkflowRunning ? "cursor-not-allowed opacity-65" : "cursor-pointer",
-                                !useTemplate
-                                  ? "border-zinc-700 bg-white text-zinc-900 dark:border-zinc-500 dark:bg-zinc-900 dark:text-white shadow-sm"
-                                  : isWorkflowRunning
-                                    ? "border-zinc-200 bg-zinc-50 text-zinc-400 dark:border-zinc-950 dark:text-zinc-600 bg-[#010101]/25"
-                                    : "border-zinc-300 hover:bg-[#F8F9FA] text-zinc-600 hover:text-zinc-800 dark:border-zinc-850 dark:hover:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200 bg-white/30 dark:bg-zinc-950/40"
-                              )}
-                            >
-                              <Settings size={13} />
-                              <span>自定义图片数</span>
-                            </button>
-                          </div>
+                              } else if (val === 'custom') {
+                                setUseTemplate(false);
+                              }
+                            }}
+                            className={cn(
+                              "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all cursor-pointer",
+                              isWorkflowRunning
+                                ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                            )}
+                          >
+                            <option value=""></option>
+                            <option value="template">参考模板配图</option>
+                            <option value="custom">自定义图片数</option>
+                          </select>
                         </div>
+                      )}
 
-                        {/* Parameter Inputs Grid */}
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-1.5 col-span-1">
-                            <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">每小节目标字数 (--num)</label>
-                            <input
-                              type="number"
-                              min={100}
-                              max={10000}
-                              value={num}
-                              disabled={isWorkflowRunning}
-                              onChange={(e) => setNum(parseInt(e.target.value) || 1500)}
-                              className={cn(
-                                "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
-                                isWorkflowRunning
-                                  ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                                  : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
-                              )}
-                            />
+                      {/* Form Container */}
+                      <div className="space-y-4">
+                        {routeType === 'no_image' && (
+                          /* Text-Only Route Parameters */
+                          <div className="grid grid-cols-2 gap-4 animate-fadeIn">
+                            <div className="space-y-1.5 col-span-1">
+                              <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">书籍写作风格</label>
+                              <input
+                                type="text"
+                                value={bookStyle}
+                                disabled={isWorkflowRunning}
+                                onChange={(e) => setBookStyle(e.target.value)}
+                                placeholder="专业教学风"
+                                className={cn(
+                                  "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 transition-all",
+                                  isWorkflowRunning
+                                    ? "bg-zinc-50 dark:bg-zinc-955 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                    : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                                )}
+                              />
+                            </div>
+                            <div className="space-y-1.5 col-span-1">
+                              <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">每小节目标字数</label>
+                              <input
+                                type="number"
+                                min={100}
+                                max={10000}
+                                value={num}
+                                disabled={isWorkflowRunning}
+                                onChange={(e) => setNum(parseInt(e.target.value) || 1500)}
+                                className={cn(
+                                  "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-650 transition-all",
+                                  isWorkflowRunning
+                                    ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                    : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                                )}
+                              />
+                            </div>
                           </div>
+                        )}
 
-                          <div className="space-y-1.5 col-span-1">
-                            <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">书籍写作风格 (--book-style)</label>
-                            <input
-                              type="text"
-                              value={bookStyle}
-                              disabled={isWorkflowRunning}
-                              onChange={(e) => setBookStyle(e.target.value)}
-                              placeholder="专业教学风"
-                              className={cn(
-                                "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
-                                isWorkflowRunning
-                                  ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                                  : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
-                              )}
-                            />
-                          </div>
+                        {routeType === 'with_image' && refMode !== '' && (
+                          /* Illustrated Route Parameters */
+                          <div className="space-y-4 animate-fadeIn">
+                            {/* Parameter Inputs Grid */}
+                            <div className="grid grid-cols-3 gap-4">
+                              <div className="space-y-1.5 col-span-1">
+                                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">每小节目标字数</label>
+                                <input
+                                  type="number"
+                                  min={100}
+                                  max={10000}
+                                  value={num}
+                                  disabled={isWorkflowRunning}
+                                  onChange={(e) => setNum(parseInt(e.target.value) || 1500)}
+                                  className={cn(
+                                    "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
+                                    isWorkflowRunning
+                                      ? "bg-zinc-50 dark:bg-zinc-955 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                      : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                                  )}
+                                />
+                              </div>
 
-                          <div className="space-y-1.5 col-span-1">
-                            <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">待提取章节标题 (--target)</label>
-                            <input
-                              type="text"
-                              value={target}
-                              disabled={isWorkflowRunning}
-                              onChange={(e) => setTarget(e.target.value)}
-                              placeholder="无"
-                              className={cn(
-                                "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
-                                isWorkflowRunning
-                                  ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                                  : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
-                              )}
-                            />
-                          </div>
+                              <div className="space-y-1.5 col-span-1">
+                                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">书籍写作风格</label>
+                                <input
+                                  type="text"
+                                  value={bookStyle}
+                                  disabled={isWorkflowRunning}
+                                  onChange={(e) => setBookStyle(e.target.value)}
+                                  placeholder="专业教学风"
+                                  className={cn(
+                                    "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
+                                    isWorkflowRunning
+                                      ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                      : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                                  )}
+                                />
+                              </div>
 
-                          <div className="space-y-1.5 col-span-1">
-                            <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">终止提取标记词 (--markers)</label>
-                            <input
-                              type="text"
-                              value={markers}
-                              disabled={isWorkflowRunning}
-                              onChange={(e) => setMarkers(e.target.value)}
-                              placeholder="无"
-                              className={cn(
-                                "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
-                                isWorkflowRunning
-                                  ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                                  : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
-                              )}
-                            />
-                          </div>
+                              <div className="space-y-1.5 col-span-1">
+                                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">待提取章节标题</label>
+                                <input
+                                  type="text"
+                                  value={target}
+                                  disabled={isWorkflowRunning}
+                                  onChange={(e) => setTarget(e.target.value)}
+                                  placeholder="无"
+                                  className={cn(
+                                    "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
+                                    isWorkflowRunning
+                                      ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                      : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                                  )}
+                                />
+                              </div>
 
-                          <div className="space-y-1.5 col-span-1">
-                            <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">配图数量 (--image-num)</label>
-                            <input
-                              type="number"
-                              min={1}
-                              max={50}
-                              value={useTemplate ? '' : imageNum}
-                              disabled={useTemplate || isWorkflowRunning}
-                              onChange={(e) => setImageNum(parseInt(e.target.value) || 3)}
-                              className={cn(
-                                "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
-                                useTemplate || isWorkflowRunning
-                                  ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                                  : "bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
-                              )}
-                            />
-                          </div>
+                              <div className="space-y-1.5 col-span-1">
+                                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">终止提取标记词</label>
+                                <input
+                                  type="text"
+                                  value={markers}
+                                  disabled={isWorkflowRunning}
+                                  onChange={(e) => setMarkers(e.target.value)}
+                                  placeholder="无"
+                                  className={cn(
+                                    "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
+                                    isWorkflowRunning
+                                      ? "bg-zinc-50 dark:bg-zinc-955 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                      : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                                  )}
+                                />
+                              </div>
 
-                          <div className="space-y-1.5 col-span-1">
-                            <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">自定义绘图风格 (--img-style)</label>
-                            <input
-                              type="text"
-                              value={imgStyle}
-                              disabled={isWorkflowRunning}
-                              onChange={(e) => setImgStyle(e.target.value)}
-                              placeholder="专业教学风"
-                              className={cn(
-                                "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
-                                isWorkflowRunning
-                                  ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                                  : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
-                              )}
-                            />
+                              <div className="space-y-1.5 col-span-1">
+                                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">配图数量</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={50}
+                                  value={useTemplate ? '' : imageNum}
+                                  disabled={useTemplate || isWorkflowRunning}
+                                  onChange={(e) => setImageNum(parseInt(e.target.value) || 3)}
+                                  className={cn(
+                                    "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
+                                    useTemplate || isWorkflowRunning
+                                      ? "bg-zinc-100/80 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                      : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                                  )}
+                                />
+                              </div>
+
+                              <div className="space-y-1.5 col-span-1">
+                                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 block">自定义绘图风格</label>
+                                <input
+                                  type="text"
+                                  value={imgStyle}
+                                  disabled={isWorkflowRunning}
+                                  onChange={(e) => setImgStyle(e.target.value)}
+                                  placeholder="专业教学风"
+                                  className={cn(
+                                    "w-full text-xs px-3 py-2 border rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400 dark:focus:ring-zinc-700 dark:focus:border-zinc-700 text-zinc-900 dark:text-zinc-100 transition-all",
+                                    isWorkflowRunning
+                                      ? "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-900 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                      : "bg-zinc-100/80 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800"
+                                  )}
+                                />
+                              </div>
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  {/* Reminder Badge */}
-                  <div className="flex items-center space-x-2 p-3.5 bg-[#F8F9FA]/80 border border-zinc-300 text-zinc-750 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-300 text-xs rounded-2xl transition-colors">
-                    <AlertCircle size={15} className="flex-shrink-0 text-zinc-500 dark:text-zinc-455" />
-                    <span>💡 提示：开始前，请确认已通过输入框左下角的 加号图标 (+) 上传了 书籍目录 和 Word 样式模板 。</span>
-                  </div>
-
-                  {/* Action Button */}
-                  <div className="flex items-center justify-end pt-3 border-t border-zinc-200 dark:border-zinc-850">
-                    <button
-                      disabled={isWorkflowRunning}
-                      onClick={async () => {
-                        let targetSessionId = currentSessionId;
-                        if (!targetSessionId) {
-                          try {
-                            targetSessionId = await createSession(activeServiceId);
-                          } catch (err) {
-                            console.error('Failed to create session:', err);
-                            return;
-                          }
-                        }
-
-                        let commandStr = '';
-                        if (routeType === 'no_image') {
-                          // Text-only route
-                          commandStr = `开始工作流：--book-style "${bookStyle}" --num ${num} --image-num 0 --direct-run`;
-                        } else {
-                          // Illustrated route
-                          commandStr = `开始工作流：--book-style "${bookStyle}" --num ${num} --target "${target}" --markers "${markers}" --img-style "${imgStyle}" --image-num ${imageNum} ${useTemplate ? '参考模板' : '不参考'} --direct-run`;
-                        }
-
-                        sendMessage(commandStr, targetSessionId, pendingFiles, true);
-                        setPendingFiles([]);
-                      }}
-                      className={cn(
-                        "flex items-center space-x-2 px-6 py-3 text-xs font-semibold rounded-xl transition-all shadow-md active:scale-95",
-                        isWorkflowRunning
-                          ? "bg-zinc-150 border border-zinc-250 text-zinc-400 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-600 cursor-not-allowed shadow-none active:scale-100"
-                          : "bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:hover:bg-zinc-200 dark:text-black hover:shadow-lg cursor-pointer"
+                      {/* Reminder Badge (Only show when route is fully configured) */}
+                      {(routeType === 'no_image' || (routeType === 'with_image' && refMode !== '')) && (
+                        <div className="space-y-4 pt-2 animate-fadeIn">
+                          {/* Reminder Badge */}
+                          <div className="flex items-center space-x-2 p-3 bg-[#F8F9FA]/80 border border-zinc-300 text-zinc-755 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-300 text-xs rounded-2xl transition-colors">
+                            <AlertCircle size={14} className="flex-shrink-0 text-zinc-550 dark:text-zinc-455" />
+                            <span>💡 提示：确认参数无误后，请确认已通过输入框左下角的 加号图标 上传了 书籍目录 和 Word 样式模板。</span>
+                          </div>
+                        </div>
                       )}
-                    >
-                      {isWorkflowRunning ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        <Play size={14} />
-                      )}
-                      <span>{isWorkflowRunning ? '工作流正在运行中...' : '确认并开始一键写作排版'}</span>
-                    </button>
+                    </div>
                   </div>
                 </div>
 
@@ -557,7 +498,7 @@ export const ChatPage: React.FC = () => {
                     className="flex items-center space-x-2 px-3 py-1.5 bg-white border border-zinc-300 rounded-xl dark:bg-[#090909] dark:border-zinc-800 relative group animate-fadeIn shadow-xs"
                   >
                     <div className={cn(
-                      "p-1.5 rounded-lg flex-shrink-0 text-xs bg-zinc-100 text-zinc-650 dark:bg-zinc-800 dark:text-zinc-200"
+                      "p-1.5 rounded-lg flex-shrink-0 text-xs bg-zinc-100 text-zinc-650 dark:bg-zinc-850 dark:text-zinc-200"
                     )}>
                       {file.name.endsWith('.docx') || file.name.endsWith('.doc') ? (
                         <FileText size={13} />
@@ -605,7 +546,6 @@ export const ChatPage: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setShowUploadMenu(!showUploadMenu);
-                    setShowDownloadMenu(false);
                   }}
                   className="p-2 rounded-xl text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white transition-all active:scale-95 cursor-pointer flex items-center justify-center"
                   title="添加附件或下载文件"
@@ -621,9 +561,8 @@ export const ChatPage: React.FC = () => {
                       onClick={() => {
                         fileInputRef.current?.click();
                         setShowUploadMenu(false);
-                        setShowDownloadMenu(false);
                       }}
-                      className="w-full flex items-center space-x-2.5 px-4 py-2.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-850 transition-all text-left"
+                      className="w-full flex items-center space-x-2.5 px-4 py-2.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-855 transition-all text-left"
                     >
                       <FileUp size={14} className="text-zinc-500 dark:text-zinc-400" />
                       <span>上传文件</span>
@@ -633,9 +572,8 @@ export const ChatPage: React.FC = () => {
                       onClick={() => {
                         folderInputRef.current?.click();
                         setShowUploadMenu(false);
-                        setShowDownloadMenu(false);
                       }}
-                      className="w-full flex items-center space-x-2.5 px-4 py-2.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-850 transition-all text-left"
+                      className="w-full flex items-center space-x-2.5 px-4 py-2.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-855 transition-all text-left"
                     >
                       <FolderPlus size={14} className="text-zinc-500 dark:text-zinc-400" />
                       <span>上传文件夹</span>
@@ -667,7 +605,7 @@ export const ChatPage: React.FC = () => {
               ) : (
                 <button
                   onClick={handleSend}
-                  disabled={!input.trim() && pendingFiles.length === 0}
+                  disabled={!input.trim() && pendingFiles.length === 0 && !(activeServiceId === 'book_writing_workflow' && (routeType === 'no_image' || (routeType === 'with_image' && refMode !== '')) && !isWorkflowRunning)}
                   className="p-2.5 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-black disabled:bg-zinc-200 disabled:text-zinc-400 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-600 disabled:cursor-not-allowed hover:bg-zinc-800 dark:hover:bg-zinc-250 transition-all shadow-md mb-1"
                 >
                   <Send size={20} />

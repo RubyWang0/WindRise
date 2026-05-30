@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../store';
-import { Settings as SettingsIcon, X, Sliders, FileText, Image as ImageIcon, Video as VideoIcon, BookOpen } from 'lucide-react';
+import { Settings as SettingsIcon, X } from 'lucide-react';
 
 export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
   const { 
@@ -14,8 +14,6 @@ export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> =
     bookDirectory, bookTemplate,
     setBookConfig
   } = useAppStore();
-
-  const [activeTab, setActiveTab] = useState<'general' | 'video' | 'book'>('general');
 
   // General Settings State
   const [tempKey, setTempKey] = useState(apiKey);
@@ -209,7 +207,7 @@ export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> =
         </div>
  
         {/* Footer */}
-        <div className="flex justify-end p-4 bg-white/80 dark:bg-[#060606] space-x-3 border-t border-zinc-300 dark:border-zinc-850">
+        <div className="flex justify-end p-4 bg-white/80 dark:bg-[#060606] space-x-3 border-t border-zinc-300 dark:border-zinc-855">
           <button 
             onClick={onClose} 
             className="px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-white rounded-lg transition-colors"
